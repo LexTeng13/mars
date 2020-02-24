@@ -18,6 +18,7 @@ from .initializer import DataFrame, Series
 # do imports to register operands
 from .datasource.from_tensor import dataframe_from_tensor
 from .datasource.from_records import from_records
+from .datasource.from_vineyard import from_vineyard
 from .datasource.read_csv import read_csv
 from .datasource.read_sql_table import read_sql_table
 from .fetch import DataFrameFetch, DataFrameFetchShuffle

@@ -101,6 +101,14 @@ class ContextBase(object):
         """
         raise NotImplementedError
 
+    def get_worker_metas(self):
+        """
+        Get worker metas
+
+        :return: List of worker metas
+        """
+        raise NotImplementedError
+
     def get_local_address(self):
         """
         Get local address
@@ -191,6 +199,9 @@ class LocalContext(ContextBase, dict):
     def get_worker_addresses(self):
         return
 
+    def get_worker_metas(self):
+        return
+
     def get_local_address(self):
         return
 
@@ -271,6 +282,9 @@ class DistributedContext(ContextBase):
 
     def get_worker_addresses(self):
         return self._resource_actor_ref.get_worker_endpoints()
+
+    def get_worker_metas(self):
+        return self._resource_actor_ref.get_worker_metas()
 
     def get_local_address(self):
         return self._address
