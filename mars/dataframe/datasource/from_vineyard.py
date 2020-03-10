@@ -18,7 +18,8 @@ from pandas.core.internals.blocks import Block
 from pandas.core.internals.managers import BlockManager
 
 from ... import opcodes as OperandDef
-from ...serialize import StringField, UInt64Field
+from ...config import options
+from ...serialize import StringField
 from ...context import get_context, RunningMode
 from ...utils import calc_nsplits
 from ..operands import DataFrameOperand, DataFrameOperandMixin, ObjectType
@@ -51,19 +52,12 @@ class DataFrameNoInput(DataFrameOperand, DataFrameOperandMixin):
 class DataFrameFromVineyard(DataFrameNoInput):
     _op_type_ = OperandDef.DATAFRAME_FROM_VINEYARD
 
-    # Location for vineyard's socket file
-    _vineyard_socket = StringField('vineyard_socket')
     # ObjectID in vineyard
-    _object_id = UInt64Field('object_id')
+    _object_id = StringField('object_id')
 
-    def __init__(self, vineyard_socket=None, object_id=None, **kw):
-        super().__init__(
-            _vineyard_socket=vineyard_socket, _object_id=object_id,
-            _object_type=ObjectType.dataframe, **kw)
-
-    @property
-    def vineyard_socket(self):
-        return self._vineyard_socket
+    def __init__(self, object_id=None, **kw):
+        super().__init__(_object_id=object_id,
+                         _object_type=ObjectType.dataframe, **kw)
 
     @property
     def object_id(self):
@@ -74,7 +68,9 @@ class DataFrameFromVineyard(DataFrameNoInput):
         import vineyard
 
         ctx = get_context()
-        client = vineyard.connect(op.vineyard_socket)
+        if not options.vineyard.socket:
+            raise RuntimeError('Not executed with vineyard')
+        client = vineyard.connect(options.vineyard.socket)
         df = client.get(op.object_id)
 
         instances = df.instances
@@ -83,7 +79,7 @@ class DataFrameFromVineyard(DataFrameNoInput):
             for chunk_id in df.local_chunks(instance_id):
                 chunk = client.get_meta(chunk_id) # FIXME: use get meta
                 chunk_index = (int(chunk['chunk_index_row']), int(chunk['chunk_index_column']))
-                chunk_map[chunk_index] = (instance_id, chunk['id'], (None, int(chunk['column_size'])))
+                chunk_map[chunk_index] = (instance_id, chunk['id'], (np.nan, int(chunk['column_size'])))
 
         nsplits = calc_nsplits({chunk_index: shape
                                 for chunk_index, (_, _, shape) in chunk_map.items()})
@@ -104,7 +100,7 @@ class DataFrameFromVineyard(DataFrameNoInput):
             out_chunks.append(chunk_op.new_chunk(None, shape=shape, index=chunk_index))
 
         new_op = op.copy()
-        return new_op.new_dataframes(op.inputs, shape=(None, None), dtypes=[],
+        return new_op.new_dataframes(op.inputs, shape=(np.nan, np.nan), dtypes=[],
                                      chunks=out_chunks, nsplits=nsplits)
 
     @classmethod
@@ -113,7 +109,9 @@ class DataFrameFromVineyard(DataFrameNoInput):
 
         chunk = op.outputs[0]
 
-        client = vineyard.connect(op.vineyard_socket)
+        if not options.vineyard.socket:
+            raise RuntimeError('Not executed with vineyard')
+        client = vineyard.connect(options.vineyard.socket)
         # chunk has a tensor chunk
         df_chunk = client.get(op.object_id)
 
@@ -130,7 +128,11 @@ class DataFrameFromVineyard(DataFrameNoInput):
         ctx[chunk.key] = pd.DataFrame(BlockManager(blocks, [df_chunk.columns, np.arange(index_size)]))
 
 
-def from_vineyard(vineyard_socket, object_id):
-    op = DataFrameFromVineyard(vineyard_socket=vineyard_socket,
-                               object_id=object_id)
-    return op(shape=None)
+def from_vineyard(df):
+    import vineyard
+    if isinstance(df, vineyard.GlobalObject):
+        object_id = df.id
+    else:
+        object_id = df
+    op = DataFrameFromVineyard(object_id=object_id, shape=(np.nan, np.nan))
+    return op(shape=(np.nan, np.nan))

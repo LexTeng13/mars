@@ -15,7 +15,8 @@
 import numpy as np
 
 from ... import opcodes as OperandDef
-from ...serialize import StringField, UInt64Field
+from ...config import options
+from ...serialize import StringField
 from ...context import get_context, RunningMode
 from ...utils import calc_nsplits
 from .core import TensorNoInput
@@ -24,10 +25,8 @@ from .core import TensorNoInput
 class TensorFromVineyard(TensorNoInput):
     _op_type_ = OperandDef.TENSOR_FROM_VINEYARD
 
-    # Location for vineyard's socket file
-    _vineyard_socket = StringField('vineyard_socket')
     # ObjectID in vineyard
-    _object_id = UInt64Field('object_id')
+    _object_id = StringField('object_id')
 
     def __init__(self, vineyard_socket=None, object_id=None, dtype=None,
                  gpu=None, sparse=None, **kw):
@@ -48,9 +47,10 @@ class TensorFromVineyard(TensorNoInput):
         import vineyard
 
         ctx = get_context()
-        client = vineyard.connect(op.vineyard_socket)
+        if not options.vineyard.socket:
+            raise RuntimeError('Not executed with vineyard')
+        client = vineyard.connect(options.vineyard.socket)
         tensor = client.get(op.object_id)
-        print(tensor.shape, tensor.chunk_shape, tensor.instances)
 
         instances = tensor.instances
         chunk_map = {}
@@ -88,20 +88,19 @@ class TensorFromVineyard(TensorNoInput):
 
         chunk = op.outputs[0]
 
-        client = vineyard.connect(op.vineyard_socket)
+        if not options.vineyard.socket:
+            raise RuntimeError('Not executed with vineyard')
+        client = vineyard.connect(options.vineyard.socket)
         # chunk has a tensor chunk
         tensor_chunk = client.get(op.object_id)
         ctx[chunk.key] = tensor_chunk.numpy()
 
 
-def from_vineyard(vineyard_socket, object_id):
+def from_vineyard(tensor):
     import vineyard
-    client = vineyard.connect(vineyard_socket)
-    tensor = client.get(object_id)
-    # FIXME: a dummy type
-    shape, dtype = tensor.shape, np.dtype('byte')
-
-    op = TensorFromVineyard(vineyard_socket=vineyard_socket,
-                            object_id=object_id,
-                            dtype=dtype, gpu=False)
-    return op(shape=shape, chunk_size=shape)
+    if isinstance(tensor, vineyard.GlobalObject):
+        object_id = tensor.id
+    else:
+        object_id = tensor
+    op = TensorFromVineyard(object_id=object_id, dtype=np.dtype('byte'), gpu=False)
+    return op(shape=(np.nan,), chunk_size=(np.nan,))
